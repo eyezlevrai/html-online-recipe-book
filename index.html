@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <!--ChatGPT made this for me. I am not a developer. This was made for my personal use only, but you can use it if you want.-->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Carnet de recettes (local)</title>
+  <style>
+    :root{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;line-height:1.4}
+    body{max-width:1200px;margin:12px auto;padding:12px}
+    h1{margin:0 0 12px}
+    /* Layout: left nav, main, right sidebar */
+    .app{display:grid;grid-template-columns:200px 1fr 340px;gap:12px}
+    .nav{border:1px solid #eee;padding:12px;border-radius:8px;background:#fff;height:fit-content}
+    .nav button{display:block;width:100%;text-align:left;padding:10px;border-radius:8px;border:0;background:transparent;cursor:pointer;color:#333;transition:color 0.2s, background 0.2s}
+    .nav button:hover{background:#f0f0f0}
+    .nav button.active{background:#0066cc;color:#fff}
+
+    main{min-height:400px}
+    .card{background:#fbfbfb;border:1px solid #e6e6e6;padding:12px;border-radius:8px}
+
+    form{display:block}
+    label{display:block;margin-top:8px;font-weight:600}
+    input[type=text],textarea,select{width:100%;padding:8px;margin-top:6px;border-radius:6px;border:1px solid #ddd}
+    input[type=file]{margin-top:6px}
+    button{margin-top:10px;padding:8px 12px;border-radius:8px;border:0;background:#0066cc;color:#fff;cursor:pointer}
+    button.ghost{background:#f2f2f2;color:#111}
+    .list{border:1px solid #eee;padding:12px;border-radius:8px;background:#fff}
+    .dish{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px dashed #eee}
+    .dish:last-child{border-bottom:none}
+    .thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;flex:0 0 48px}
+    .meta{font-size:0.9em;color:#666}
+    .row{display:flex;gap:8px;align-items:center}
+    .small{font-size:0.9em}
+    .pill{display:inline-block;padding:4px 8px;background:#eef;border-radius:16px;margin-right:6px}
+    .controls{display:flex;gap:8px;margin-top:8px}
+    .danger{background:#cc3300}
+    .actions button{background:#444}
+    .json-area{width:100%;height:120px}
+    .placeholder{color:#999;font-style:italic}
+
+    /* Planner styles */
+    .planner{margin-top:12px}
+    .planner table{width:100%;border-collapse:collapse}
+    .planner th,.planner td{border:1px solid #e6e6e6;padding:8px;text-align:center;vertical-align:top}
+    .planner th{background:#fafafa}
+    .planner .cell{min-height:80px;padding:6px}
+    .planner .cell img{max-width:100%;height:90px;object-fit:cover;border-radius:6px;display:block;margin:0 auto}
+    .planner .cell .rname{display:block;margin-top:6px;font-weight:600}
+    .planner .cell .clearBtn{background:transparent;color:#cc3300;border:0;cursor:pointer;margin-top:6px}
+    .planner .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+
+    @media (max-width:1000px){.app{grid-template-columns:1fr;}.nav{order:2}.right{order:3}.main{order:1}}
+  </style>
+</head>
+<body>
+  <h1>Carnet de recettes (local)</h1>
+  <p class="small">Site statique — vos recettes sont enregistrées dans votre navigateur (localStorage). Pas de serveur requis.</p>
+
+  <div class="app">
+    <!-- Left navigation -->
+    <nav class="nav card">
+      <strong>Navigation</strong>
+      <div style="height:8px"></div>
+      <button id="navRecipes" class="active">Ajouter / Modifier des recettes</button>
+      <button id="navPlanner">Prévoir la semaine</button>
+      <div style="height:8px"></div>
+      <small class="small">Ton planning et tes recettes sont locaux au navigateur.</small>
+    </nav>
+
+    <!-- Main content: will switch between pages -->
+    <main class="main">
+      <!-- Recipes page -->
+      <section id="pageRecipes">
+        <div class="card">
+          <h2>Ajouter / Modifier une recette</h2>
+          <form id="recipeForm">
+            <input type="hidden" id="editingId" />
+            <label for="name">Nom du plat</label>
+            <input id="name" type="text" placeholder="Ex. : Ratatouille" required />
+
+            <label>Image (facultatif) — sera affichée dans le planning</label>
+            <input id="recipeImage" type="file" accept="image/*" />
+            <div id="imagePreview" style="margin-top:8px;display:flex;gap:8px;align-items:center"></div>
+
+            <button id="removeImageBtn" type="button" class="ghost" style="display:none;margin-top:8px">Supprimer l'image</button>
+
+            <label>Ingrédients</label>
+            <div id="ingredientsWrap"></div>
+            <button type="button" id="addIngredient" class="ghost">+ Ajouter un ingrédient</button>
+
+            <label>Étapes</label>
+            <div id="stepsWrap"></div>
+            <button type="button" id="addStep" class="ghost">+ Ajouter une étape</button>
+
+            <label for="notes">Remarques / Notes (facultatif)</label>
+            <textarea id="notes" rows="3" placeholder="Temps, variations..."></textarea>
+
+            <div class="controls">
+              <button id="saveBtn">Enregistrer la recette</button>
+              <button id="resetBtn" type="button" class="ghost">Réinitialiser</button>
+            </div>
+
+            <details style="margin-top:12px">
+              <summary>Importer / Exporter</summary>
+              <p class="small">Exporter pour sauvegarder ou partager; importer pour restaurer.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button id="exportJson">Exporter JSON</button>
+                <label class="ghost" style="padding:8px;border-radius:8px;cursor:pointer;background:#fafafa;border:1px dashed #ddd">Importer JSON
+                  <input type="file" id="importFile" accept="application/json" style="display:none" />
+                </label>
+                <button id="clearAll" class="danger">Supprimer tout</button>
+              </div>
+            </details>
+          </form>
+        </div>
+      </section>
+
+      <!-- Planner page -->
+      <section id="pagePlanner" style="display:none">
+        <div class="card planner">
+          <h2>Planning hebdomadaire</h2>
+          <div class="small">Clique sur une case pour assigner une recette.</div>
+          <div id="plannerContainer" style="margin-top:8px"></div>
+          <div class="controls">
+            <button id="clearWeekBtn" class="ghost" type="button">Effacer la semaine</button>
+            <button id="fillRandomBtn" class="ghost" type="button">Remplir aléatoirement</button>
+            <button id="exportPlanBtn" class="ghost" type="button">Exporter planning</button>
+            <label class="ghost" style="padding:8px;border-radius:8px;cursor:pointer;background:#fafafa;border:1px dashed #ddd">Importer planning
+              <input type="file" id="importPlanFile" accept="application/json" style="display:none" />
+            </label>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Right sidebar: recipes list & help -->
+    <aside class="right">
+      <div class="list">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>Recettes</strong>
+          <input id="search" placeholder="Rechercher..." />
+        </div>
+        <div id="dishes" style="margin-top:8px"></div>
+      </div>
+
+      <div class="list" style="margin-top:12px">
+        <strong>Mode d'emploi rapide</strong>
+        <ol>
+          <li>Utilise le menu à gauche pour basculer entre l'ajout de recettes et le planning.</li>
+          <li>Dans "Ajouter / Modifier", crée tes recettes puis sauvegarde (tu peux joindre une image).</li>
+          <li>Dans "Prévoir la semaine", clique sur une case pour choisir une recette — si une image est attachée elle s'affichera ici.</li>
+          <li>Toutes les données sont stockées localement (localStorage).</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // Storage keys
+    const KEY = 'myCookbook_v1';
+    const PLAN_KEY = 'myCookbook_plan_v1';
+
+    // Image resize settings
+    const MAX_IMAGE_WIDTH = 800; // px
+    const MAX_IMAGE_KB = 150; // kilobytes target
+    const JPEG_QUALITY = 0.8; // used when exporting resized jpeg
+
+    // Page switching
+    const navRecipes = document.getElementById('navRecipes');
+    const navPlanner = document.getElementById('navPlanner');
+    const pageRecipes = document.getElementById('pageRecipes');
+    const pagePlanner = document.getElementById('pagePlanner');
+
+    function showPage(page){
+      if(page==='recipes'){
+        pageRecipes.style.display='block'; pagePlanner.style.display='none';
+        navRecipes.classList.add('active'); navPlanner.classList.remove('active');
+      } else {
+        pageRecipes.style.display='none'; pagePlanner.style.display='block';
+        navRecipes.classList.remove('active'); navPlanner.classList.add('active');
+      }
+      // re-render contextual UI
+      renderList(); renderPlanner();
+    }
+
+    navRecipes.addEventListener('click', ()=>showPage('recipes'));
+    navPlanner.addEventListener('click', ()=>showPage('planner'));
+
+    // Helpers to create dynamic inputs
+    function createIngredient(value=''){
+      const div = document.createElement('div');
+      div.className = 'row';
+      const inp = document.createElement('input'); inp.type='text'; inp.placeholder='Ex. : 2 tomates, 1 oignon'; inp.value = value;
+      const del = document.createElement('button'); del.type='button'; del.className='ghost'; del.textContent='✕';
+      del.addEventListener('click', ()=>div.remove());
+      div.appendChild(inp); div.appendChild(del);
+      return div;
+    }
+    function createStep(value=''){
+      const div = document.createElement('div');
+      const ta = document.createElement('textarea'); ta.rows=2; ta.placeholder='Décrire la étape'; ta.value=value;
+      const del = document.createElement('button'); del.type='button'; del.className='ghost'; del.textContent='✕';
+      del.addEventListener('click', ()=>div.remove());
+      div.appendChild(ta); div.appendChild(del);
+      return div;
+    }
+
+    // DOM refs
+    const ingredientsWrap = document.getElementById('ingredientsWrap');
+    const stepsWrap = document.getElementById('stepsWrap');
+    const addIngredientBtn = document.getElementById('addIngredient');
+    const addStepBtn = document.getElementById('addStep');
+    const recipeForm = document.getElementById('recipeForm');
+    const dishesEl = document.getElementById('dishes');
+    const saveBtn = document.getElementById('saveBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const search = document.getElementById('search');
+    const recipeImageInput = document.getElementById('recipeImage');
+    const imagePreview = document.getElementById('imagePreview');
+    const removeImageBtn = document.getElementById('removeImageBtn');
+
+    const clearWeekBtn = document.getElementById('clearWeekBtn');
+    const fillRandomBtn = document.getElementById('fillRandomBtn');
+    const exportPlanBtn = document.getElementById('exportPlanBtn');
+    const importPlanFile = document.getElementById('importPlanFile');
+
+    addIngredientBtn.addEventListener('click', ()=>ingredientsWrap.appendChild(createIngredient()));
+    addStepBtn.addEventListener('click', ()=>stepsWrap.appendChild(createStep()));
+
+    // track if user wants to remove existing image when editing
+    let deleteImageFlag = false;
+
+    removeImageBtn.addEventListener('click', ()=>{
+      // clear input and preview, mark for deletion
+      recipeImageInput.value = '';
+      imagePreview.innerHTML = '';
+      removeImageBtn.style.display = 'none';
+      deleteImageFlag = true;
+    });
+
+    // Image preview handler (also resize preview for display)
+    recipeImageInput.addEventListener('change', ()=>{
+      const f = recipeImageInput.files[0];
+      deleteImageFlag = false; // if user selects new file, cancel delete flag
+      imagePreview.innerHTML = '';
+      removeImageBtn.style.display = 'none';
+      if(!f) return;
+      const r = new FileReader();
+      r.onload = ()=>{
+        const img = document.createElement('img'); img.src = r.result; img.style.maxWidth='180px'; img.style.borderRadius='6px'; img.alt='Aperçu';
+        imagePreview.appendChild(img);
+        removeImageBtn.style.display = 'inline-block';
+      };
+      r.readAsDataURL(f);
+    });
+
+    // Load / Save recipes
+    function loadAll(){
+      try{
+        const raw = localStorage.getItem(KEY);
+        return raw ? JSON.parse(raw) : [];
+      }catch(e){ console.error('load', e); return []; }
+    }
+    function saveAll(list){ localStorage.setItem(KEY, JSON.stringify(list)); }
+
+    // Planner load/save
+    function loadPlan(){
+      try{ const raw = localStorage.getItem(PLAN_KEY); return raw ? JSON.parse(raw) : defaultPlan(); }catch(e){ console.error(e); return defaultPlan(); }
+    }
+    function savePlan(plan){ localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); }
+
+    function defaultPlan(){
+      const days = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+      const meals = ['Petit-déjeuner','Déjeuner','Dîner'];
+      const p = {};
+      days.forEach(d=>{ p[d] = {}; meals.forEach(m=>p[d][m]=null); });
+      return p;
+    }
+
+    // --- Image utilities (resize to limit size for localStorage) ---
+    function dataURLtoImage(dataURL){
+      return new Promise((resolve,reject)=>{
+        const img = new Image(); img.onload = ()=>resolve(img); img.onerror = reject; img.src = dataURL;
+      });
+    }
+    function fileToDataURL(file){
+      return new Promise((resolve,reject)=>{
+        const r = new FileReader(); r.onload = ()=>resolve(r.result); r.onerror = reject; r.readAsDataURL(file);
+      });
+    }
+    async function resizeDataUrlIfNeeded(dataUrl, maxKb=MAX_IMAGE_KB, maxWidth=MAX_IMAGE_WIDTH){
+      // quick estimate of size
+      const head = 'data:image';
+      if(!dataUrl || !dataUrl.startsWith('data:image')) return null;
+      const sizeKB = Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 3/4 / 1024);
+      if(sizeKB <= maxKb){
+        // still check width
+        try{ const img = await dataURLtoImage(dataUrl); if(img.width <= maxWidth) return dataUrl; }
+        catch(e){ return dataUrl; }
+      }
+      // resize via canvas
+      const img = await dataURLtoImage(dataUrl);
+      const scale = Math.min(1, maxWidth / img.width);
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+      // try multiple qualities to approach size limit
+      let quality = JPEG_QUALITY;
+      let attempt = canvas.toDataURL('image/jpeg', quality);
+      let attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
+      // reduce quality until under limit or 3 tries
+      let tries = 0;
+      while(attemptKB > maxKb && tries < 6){
+        quality *= 0.8; // reduce
+        attempt = canvas.toDataURL('image/jpeg', quality);
+        attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
+        tries++;
+        if(quality < 0.2) break;
+      }
+      return attempt;
+    }
+
+    // Render list (with thumbnail)
+    function renderList(filter=''){
+      const list = loadAll();
+      dishesEl.innerHTML = '';
+      const q = (filter || search.value || '').toLowerCase();
+      const filtered = list.filter(r=>{
+        if(!q) return true;
+        return (r.name && r.name.toLowerCase().includes(q)) || (r.notes && r.notes.toLowerCase().includes(q)) || (r.ingredients || []).join(' ').toLowerCase().includes(q) || (r.steps || []).join(' ').toLowerCase().includes(q);
+      });
+
+      if(filtered.length===0){ dishesEl.innerHTML = '<div class="placeholder">Aucune recette — ajoutez-en une !</div>'; return }
+
+      filtered.forEach(r=>{
+        const div = document.createElement('div'); div.className='dish';
+        if(r.image){ const thumb = document.createElement('img'); thumb.className='thumb'; thumb.src = r.image; thumb.alt = r.name; div.appendChild(thumb); } else {
+          const placeholder = document.createElement('div'); placeholder.style.width='48px'; placeholder.style.height='48px'; placeholder.style.borderRadius='6px'; placeholder.style.background='#f6f6f6'; placeholder.style.flex='0 0 48px'; div.appendChild(placeholder);
+        }
+        const body = document.createElement('div'); body.style.flex='1';
+        const title = document.createElement('div'); title.innerHTML = `<strong>${escapeHtml(r.name)}</strong>`;
+        const meta = document.createElement('div'); meta.className='meta'; meta.textContent = (r.ingredients||[]).length + ' ingrédients — ' + (r.steps||[]).length + ' étapes';
+        const notes = document.createElement('div'); notes.className='small'; notes.textContent = r.notes || '';
+        const actions = document.createElement('div'); actions.className='actions';
+        const view = document.createElement('button'); view.type='button'; view.textContent='Voir'; view.addEventListener('click', ()=>showRecipe(r.id));
+        const addToPlan = document.createElement('button'); addToPlan.type='button'; addToPlan.textContent='Ajouter au planning'; addToPlan.addEventListener('click', ()=>quickAssign(r.id));
+        const edit = document.createElement('button'); edit.type='button'; edit.textContent='Modifier'; edit.addEventListener('click', ()=>editRecipe(r.id));
+        const del = document.createElement('button'); del.type='button'; del.textContent='Supprimer'; del.className='danger'; del.addEventListener('click', ()=>{ if(confirm('Supprimer cette recette ?')){ deleteRecipe(r.id);} });
+        actions.appendChild(view); actions.appendChild(addToPlan); actions.appendChild(edit); actions.appendChild(del);
+
+        body.appendChild(title); body.appendChild(meta); if(r.notes) body.appendChild(notes); body.appendChild(actions);
+        div.appendChild(body);
+        dishesEl.appendChild(div);
+      });
+    }
+
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+    // Create id
+    function uid(){ return 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+    // Save form (async to allow image resizing)
+    recipeForm.addEventListener('submit', async (e)=>{ e.preventDefault(); await onSave(); });
+    resetBtn.addEventListener('click', ()=>resetForm());
+
+    async function onSave(){
+      const name = document.getElementById('name').value.trim();
+      if(!name){ alert('Nom requis'); return }
+      const ingredients = Array.from(ingredientsWrap.querySelectorAll('input')).map(i=>i.value.trim()).filter(Boolean);
+      const steps = Array.from(stepsWrap.querySelectorAll('textarea')).map(t=>t.value.trim()).filter(Boolean);
+      const notes = document.getElementById('notes').value.trim();
+      const editingId = document.getElementById('editingId').value;
+
+      const list = loadAll();
+
+      // determine image data
+      let imageData = null;
+      if(recipeImageInput.files && recipeImageInput.files[0]){
+        try{
+          const originalData = await fileToDataURL(recipeImageInput.files[0]);
+          imageData = await resizeDataUrlIfNeeded(originalData, MAX_IMAGE_KB, MAX_IMAGE_WIDTH);
+        }catch(err){ console.error('resize',err); imageData = null; }
+      } else if(editingId){
+        const existing = list.find(x=>x.id===editingId);
+        if(deleteImageFlag) imageData = null; else imageData = existing ? existing.image || null : null;
+      }
+
+      if(editingId){
+        const idx = list.findIndex(x=>x.id===editingId);
+        if(idx>=0){ list[idx] = { ...list[idx], name, ingredients, steps, notes, image: imageData, updated: new Date().toISOString() } }
+      } else {
+        const recipe = { id: uid(), name, ingredients, steps, notes, image: imageData, created: new Date().toISOString() };
+        list.unshift(recipe);
+      }
+      saveAll(list);
+      resetForm();
+      renderList();
+      renderPlanner();
+    }
+
+    function resetForm(){ document.getElementById('editingId').value=''; recipeForm.reset(); ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; imagePreview.innerHTML=''; removeImageBtn.style.display='none'; deleteImageFlag=false; ingredientsWrap.appendChild(createIngredient()); stepsWrap.appendChild(createStep()); }
+
+    function editRecipe(id){ const list = loadAll(); const r = list.find(x=>x.id===id); if(!r) return; showPage('recipes'); document.getElementById('editingId').value = r.id; document.getElementById('name').value = r.name || ''; document.getElementById('notes').value = r.notes || ''; ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; (r.ingredients||[]).forEach(i=>ingredientsWrap.appendChild(createIngredient(i))); (r.steps||[]).forEach(s=>stepsWrap.appendChild(createStep(s))); imagePreview.innerHTML=''; recipeImageInput.value=''; deleteImageFlag=false; if(r.image){ const img = document.createElement('img'); img.src = r.image; img.style.maxWidth='180px'; img.style.borderRadius='6px'; imagePreview.appendChild(img); removeImageBtn.style.display='inline-block'; } else removeImageBtn.style.display='none';
+      window.scrollTo({top:0,behavior:'smooth'});
+    }
+
+    function deleteRecipe(id){ const list = loadAll().filter(x=>x.id!==id); saveAll(list);
+      // also remove from any plan that references it
+      const plan = loadPlan(); Object.keys(plan).forEach(day=>{ Object.keys(plan[day]).forEach(meal=>{ if(plan[day][meal]===id) plan[day][meal]=null; }); }); savePlan(plan);
+      renderList(); renderPlanner(); }
+
+    function showRecipe(id){ const list = loadAll(); const r = list.find(x=>x.id===id); if(!r) return; const modal = window.open('','Recette','width=600,height=700'); const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(r.name)}</title><style>body{font-family:system-ui;padding:18px}h1{margin-top:0}.meta{color:#555}img{max-width:100%;height:auto;border-radius:8px}</style></head><body><h1>${escapeHtml(r.name)}</h1>${r.image?('<img src="'+r.image+'" alt="'+escapeHtml(r.name)+'"/>') : ''}<div class="meta">Créée: ${new Date(r.created||'').toLocaleString()}</div><h3>Ingrédients</h3><ul>${(r.ingredients||[]).map(i=>'<li>'+escapeHtml(i)+'</li>').join('')}</ul><h3>Étapes</h3><ol>${(r.steps||[]).map(s=>'<li>'+escapeHtml(s)+'</li>').join('')}</ol>${r.notes?('<h3>Notes</h3><p>'+escapeHtml(r.notes)+'</p>') : ''}</body></html>`;
+      modal.document.write(html);
+      modal.document.close();
+    }
+
+    // Planner UI
+    const DAYS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+    const MEALS = ['Petit-déjeuner','Déjeuner','Dîner'];
+
+    function renderPlanner(){
+      const plan = loadPlan();
+      const recipes = loadAll();
+      // build table
+      let html = '<table><thead><tr><th></th>' + DAYS.map(d=>`<th>${d}</th>`).join('') + '</tr></thead><tbody>';
+      MEALS.forEach(meal=>{
+        html += `<tr><th>${meal}</th>`;
+        DAYS.forEach(day=>{
+          const rid = plan[day] && plan[day][meal] ? plan[day][meal] : null;
+          const recipe = recipes.find(r=>r.id===rid);
+          let cellContent = '<div class="placeholder">—</div>';
+          if(recipe){
+            const imgHtml = recipe.image ? `<img src="${recipe.image}" alt="${escapeHtml(recipe.name)}"/>` : '';
+            cellContent = `<div class="cellInner">${imgHtml}<span class="rname">${escapeHtml(recipe.name)}</span><button class="clearBtn" data-day="${day}" data-meal="${meal}" data-action="clear">Supprimer</button></div>`;
+          }
+          html += `<td class="cell" data-day="${day}" data-meal="${meal}">${cellContent}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('plannerContainer').innerHTML = html;
+
+      // add click handlers for cells
+      document.querySelectorAll('.cell').forEach(td=>{
+        td.addEventListener('click',(e)=>{
+          if(e.target && e.target.getAttribute && e.target.getAttribute('data-action')==='clear') return;
+          openAssignPopup(td.getAttribute('data-day'), td.getAttribute('data-meal'), td);
+        });
+      });
+      // clear buttons
+      document.querySelectorAll('button[data-action="clear"]').forEach(btn=>{
+        btn.addEventListener('click',(e)=>{
+          e.stopPropagation(); const day = btn.getAttribute('data-day'); const meal = btn.getAttribute('data-meal'); assignRecipeToCell(day, meal, null);
+        });
+      });
+    }
+
+    function openAssignPopup(day, meal, cell){
+      const recipes = loadAll();
+      const sel = document.createElement('select'); sel.style.width = '100%';
+      const empty = document.createElement('option'); empty.value=''; empty.textContent='(Aucun)'; sel.appendChild(empty);
+      recipes.forEach(r=>{ const o = document.createElement('option'); o.value = r.id; o.textContent = r.name; sel.appendChild(o); });
+      const save = document.createElement('button'); save.textContent='Valider'; save.style.marginTop='6px';
+      const box = document.createElement('div'); box.appendChild(sel); box.appendChild(save);
+
+      const popup = document.createElement('div'); popup.style.position='absolute'; popup.style.background='#fff'; popup.style.border='1px solid #ddd'; popup.style.padding='8px'; popup.style.boxShadow='0 4px 12px rgba(0,0,0,0.08)';
+      popup.appendChild(box);
+      document.body.appendChild(popup);
+      const rect = cell.getBoundingClientRect();
+      popup.style.left = (rect.left + window.scrollX) + 'px';
+      popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+
+      save.addEventListener('click', ()=>{ const rid = sel.value || null; assignRecipeToCell(day, meal, rid); document.body.removeChild(popup); });
+
+      function onDocClick(ev){ if(!popup.contains(ev.target)){ document.body.removeChild(popup); document.removeEventListener('click', onDocClick); } }
+      setTimeout(()=>document.addEventListener('click', onDocClick));
+    }
+
+    function assignRecipeToCell(day, meal, recipeId){
+      const plan = loadPlan(); if(!plan[day]) plan[day] = {};
+      plan[day][meal] = recipeId;
+      savePlan(plan);
+      renderPlanner();
+    }
+
+    // Quick assign used from recipe list: asks day+meal
+    function quickAssign(recipeId){
+      const day = prompt('Jour (ex : Lundi) :'); if(!day) return; const normalized = day.charAt(0).toUpperCase()+day.slice(1).toLowerCase(); if(!DAYS.includes(normalized)){ alert('Jour invalide — utilisez par ex. Lundi, Mardi...'); return }
+      const meal = prompt('Repas (Petit-déjeuner, Déjeuner, Dîner) :'); if(!meal) return; const mNorm = meal.charAt(0).toUpperCase()+meal.slice(1).toLowerCase(); if(!MEALS.includes(mNorm)){ alert('Repas invalide.'); return }
+      assignRecipeToCell(normalized, mNorm, recipeId);
+      alert('Recette assignée au planning.');
+    }
+
+    // Misc planner actions
+    clearWeekBtn.addEventListener('click', ()=>{ if(confirm('Effacer tout le planning de la semaine ?')){ savePlan(defaultPlan()); renderPlanner(); } });
+    fillRandomBtn.addEventListener('click', ()=>{ const recipes = loadAll(); if(recipes.length===0){ alert('Aucune recette disponible pour remplir le planning.'); return } const plan = loadPlan(); DAYS.forEach(d=>{ MEALS.forEach(m=>{ const r = recipes[Math.floor(Math.random()*recipes.length)]; plan[d][m] = r.id; }); }); savePlan(plan); renderPlanner(); });
+
+    exportPlanBtn.addEventListener('click', ()=>{ const data = loadPlan(); const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'planning.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+
+    importPlanFile.addEventListener('change',(e)=>{ const f = e.target.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = ()=>{ try{ const parsed = JSON.parse(reader.result); if(typeof parsed !== 'object'){ alert('Format invalide'); return } savePlan(parsed); renderPlanner(); alert('Planning importé.'); }catch(err){ alert('Fichier JSON invalide'); } }; reader.readAsText(f); e.target.value=''; });
+
+    // Export/Import recipes (include image field). On import we resize images to keep localStorage small.
+    document.getElementById('exportJson').addEventListener('click', ()=>{
+      const list = loadAll(); const blob = new Blob([JSON.stringify(list, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'recettes.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('importFile').addEventListener('change', async (e)=>{
+      const f = e.target.files[0]; if(!f) return; const reader = new FileReader();
+      reader.onload = async ()=>{
+        try{ const data = JSON.parse(reader.result); if(!Array.isArray(data)){ alert('Format invalide : JSON attendu (tableau).'); return }
+          // Accept image field if present (base64 dataURL) and resize it if needed
+          const cleaned = [];
+          for(const it of data){
+            let img = it.image || null;
+            if(img){
+              try{ img = await resizeDataUrlIfNeeded(img, MAX_IMAGE_KB, MAX_IMAGE_WIDTH); }catch(err){ console.warn('image resize import failed',err); img = null; }
+            }
+            cleaned.push({ id: it.id || uid(), name: it.name||'Sans nom', ingredients: it.ingredients||[], steps: it.steps||[], notes: it.notes||'', image: img || null, created: it.created||new Date().toISOString() });
+          }
+          saveAll(cleaned);
+          renderList();
+          renderPlanner();
+          alert('Importation terminée.');
+        }catch(err){ console.error(err); alert('Erreur lors de l\'importation : fichier JSON invalide.'); }
+      };
+      reader.readAsText(f);
+      e.target.value = '';
+    });
+
+    // Clear all recipes
+    document.getElementById('clearAll').addEventListener('click', ()=>{ if(confirm('Supprimer toutes les recettes de ce navigateur ? Cette action est irréversible.')){ localStorage.removeItem(KEY); renderList(); renderPlanner(); } });
+
+    // Search
+    search.addEventListener('input', ()=>renderList(search.value.trim()));
+
+    // Init
+    (function(){ resetForm(); renderList(); renderPlanner(); showPage('recipes'); })();
+  </script>
+</body>
+</html>
