@@ -9,6 +9,7 @@
     :root{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;line-height:1.4}
     body{max-width:1200px;margin:12px auto;padding:12px}
     h1{margin:0 0 12px}
+
     /* Layout: left nav, main, right sidebar */
     .app{display:grid;grid-template-columns:200px 1fr 340px;gap:12px}
     .nav{border:1px solid #eee;padding:12px;border-radius:8px;background:#fff;height:fit-content}
@@ -21,7 +22,7 @@
 
     form{display:block}
     label{display:block;margin-top:8px;font-weight:600}
-    input[type=text],textarea,select{width:100%;padding:8px;margin-top:6px;border-radius:6px;border:1px solid #ddd}
+    input[type=text],textarea,select,input[type=url]{width:100%;padding:8px;margin-top:6px;border-radius:6px;border:1px solid #ddd}
     input[type=file]{margin-top:6px}
     button{margin-top:10px;padding:8px 12px;border-radius:8px;border:0;background:#0066cc;color:#fff;cursor:pointer}
     button.ghost{background:#f2f2f2;color:#111}
@@ -81,6 +82,14 @@
 
             <label>Image (facultatif) — sera affichée dans le planning</label>
             <input id="recipeImage" type="file" accept="image/*" />
+
+            <label style="margin-top:8px">Ou importer depuis une URL</label>
+            <input id="recipeImageUrl" type="url" placeholder="https://example.com/mon-image.jpg" />
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button id="loadFromUrlBtn" type="button" class="ghost">Charger depuis l'URL</button>
+              <button id="clearUrlBtn" type="button" class="ghost">Effacer l'URL</button>
+            </div>
+
             <div id="imagePreview" style="margin-top:8px;display:flex;gap:8px;align-items:center"></div>
 
             <button id="removeImageBtn" type="button" class="ghost" style="display:none;margin-top:8px">Supprimer l'image</button>
@@ -148,7 +157,7 @@
         <strong>Mode d'emploi rapide</strong>
         <ol>
           <li>Utilise le menu à gauche pour basculer entre l'ajout de recettes et le planning.</li>
-          <li>Dans "Ajouter / Modifier", crée tes recettes puis sauvegarde (tu peux joindre une image).</li>
+          <li>Dans "Ajouter / Modifier", crée tes recettes puis sauvegarde (tu peux joindre une image ou utiliser une URL).</li>
           <li>Dans "Prévoir la semaine", clique sur une case pour choisir une recette — si une image est attachée elle s'affichera ici.</li>
           <li>Toutes les données sont stockées localement (localStorage).</li>
         </ol>
@@ -217,6 +226,9 @@
     const resetBtn = document.getElementById('resetBtn');
     const search = document.getElementById('search');
     const recipeImageInput = document.getElementById('recipeImage');
+    const recipeImageUrl = document.getElementById('recipeImageUrl');
+    const loadFromUrlBtn = document.getElementById('loadFromUrlBtn');
+    const clearUrlBtn = document.getElementById('clearUrlBtn');
     const imagePreview = document.getElementById('imagePreview');
     const removeImageBtn = document.getElementById('removeImageBtn');
 
@@ -232,19 +244,20 @@
     let deleteImageFlag = false;
 
     removeImageBtn.addEventListener('click', ()=>{
-      // clear input and preview, mark for deletion
       recipeImageInput.value = '';
+      recipeImageUrl.value = '';
       imagePreview.innerHTML = '';
       removeImageBtn.style.display = 'none';
       deleteImageFlag = true;
     });
 
-    // Image preview handler (also resize preview for display)
+    // Image preview handler (file input)
     recipeImageInput.addEventListener('change', ()=>{
       const f = recipeImageInput.files[0];
       deleteImageFlag = false; // if user selects new file, cancel delete flag
       imagePreview.innerHTML = '';
       removeImageBtn.style.display = 'none';
+      recipeImageUrl.value = '';
       if(!f) return;
       const r = new FileReader();
       r.onload = ()=>{
@@ -254,6 +267,33 @@
       };
       r.readAsDataURL(f);
     });
+
+    // Load image from URL: fetch, convert to dataURL, show preview
+    loadFromUrlBtn.addEventListener('click', async ()=>{
+      const url = recipeImageUrl.value.trim();
+      if(!url){ alert('Colle une URL d\'image valide.'); return; }
+      try{
+        // attempt to fetch the image (may fail due to CORS)
+        const resp = await fetch(url, {mode:'cors'});
+        if(!resp.ok) throw new Error('Échec du téléchargement');
+        const blob = await resp.blob();
+        // ensure it's an image
+        if(!blob.type.startsWith('image/')) throw new Error('URL ne pointe pas vers une image');
+        const dataUrl = await fileToDataURL(new File([blob], 'remote-image'));
+        // display preview (original); actual resizing will happen on save
+        imagePreview.innerHTML = '';
+        const img = document.createElement('img'); img.src = dataUrl; img.style.maxWidth='180px'; img.style.borderRadius='6px'; img.alt='Aperçu';
+        imagePreview.appendChild(img);
+        removeImageBtn.style.display = 'inline-block';
+        // store the fetched dataURL in a hidden temporary place: we reuse the file input's dataset
+        recipeImageInput.dataset.remote = dataUrl;
+        // clear file input
+        recipeImageInput.value = '';
+        deleteImageFlag = false;
+      }catch(err){ console.error(err); alert('Impossible de charger l\'image depuis l\'URL (CORS ou URL invalide). Essaie une autre URL ou téléverse le fichier.'); }
+    });
+
+    clearUrlBtn.addEventListener('click', ()=>{ recipeImageUrl.value = ''; recipeImageInput.dataset.remote = ''; });
 
     // Load / Save recipes
     function loadAll(){
@@ -281,7 +321,7 @@
     // --- Image utilities (resize to limit size for localStorage) ---
     function dataURLtoImage(dataURL){
       return new Promise((resolve,reject)=>{
-        const img = new Image(); img.onload = ()=>resolve(img); img.onerror = reject; img.src = dataURL;
+        const img = new Image(); img.crossOrigin = 'anonymous'; img.onload = ()=>resolve(img); img.onerror = reject; img.src = dataURL;
       });
     }
     function fileToDataURL(file){
@@ -290,36 +330,42 @@
       });
     }
     async function resizeDataUrlIfNeeded(dataUrl, maxKb=MAX_IMAGE_KB, maxWidth=MAX_IMAGE_WIDTH){
+      if(!dataUrl) return null;
       // quick estimate of size
-      const head = 'data:image';
-      if(!dataUrl || !dataUrl.startsWith('data:image')) return null;
       const sizeKB = Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 3/4 / 1024);
-      if(sizeKB <= maxKb){
-        // still check width
-        try{ const img = await dataURLtoImage(dataUrl); if(img.width <= maxWidth) return dataUrl; }
-        catch(e){ return dataUrl; }
-      }
-      // resize via canvas
-      const img = await dataURLtoImage(dataUrl);
-      const scale = Math.min(1, maxWidth / img.width);
-      const w = Math.max(1, Math.round(img.width * scale));
-      const h = Math.max(1, Math.round(img.height * scale));
-      const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
-      // try multiple qualities to approach size limit
-      let quality = JPEG_QUALITY;
-      let attempt = canvas.toDataURL('image/jpeg', quality);
-      let attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
-      // reduce quality until under limit or 3 tries
-      let tries = 0;
-      while(attemptKB > maxKb && tries < 6){
-        quality *= 0.8; // reduce
-        attempt = canvas.toDataURL('image/jpeg', quality);
-        attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
-        tries++;
-        if(quality < 0.2) break;
-      }
-      return attempt;
+      try{
+        const img = await dataURLtoImage(dataUrl);
+        if(sizeKB <= maxKb && img.width <= maxWidth) return dataUrl;
+        const scale = Math.min(1, maxWidth / img.width);
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+        // try multiple qualities to approach size limit
+        let quality = JPEG_QUALITY;
+        let attempt = canvas.toDataURL('image/jpeg', quality);
+        let attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
+        let tries = 0;
+        while(attemptKB > maxKb && tries < 6){
+          quality *= 0.8;
+          attempt = canvas.toDataURL('image/jpeg', quality);
+          attemptKB = Math.ceil((attempt.length - attempt.indexOf(',') - 1) * 3/4 / 1024);
+          tries++;
+          if(quality < 0.2) break;
+        }
+        return attempt;
+      }catch(e){ console.warn('resize failed, returning original'); return dataUrl; }
+    }
+
+    // utility: if image is an http(s) URL (not data:), fetch and convert
+    async function fetchImageUrlToDataUrl(url){
+      try{
+        const resp = await fetch(url, {mode:'cors'});
+        if(!resp.ok) throw new Error('fetch failed');
+        const blob = await resp.blob();
+        if(!blob.type.startsWith('image/')) throw new Error('not image');
+        return await fileToDataURL(new File([blob], 'remote'));
+      }catch(err){ console.warn('fetchImageUrlToDataUrl failed', err); throw err; }
     }
 
     // Render list (with thumbnail)
@@ -340,7 +386,7 @@
           const placeholder = document.createElement('div'); placeholder.style.width='48px'; placeholder.style.height='48px'; placeholder.style.borderRadius='6px'; placeholder.style.background='#f6f6f6'; placeholder.style.flex='0 0 48px'; div.appendChild(placeholder);
         }
         const body = document.createElement('div'); body.style.flex='1';
-        const title = document.createElement('div'); title.innerHTML = `<strong>${escapeHtml(r.name)}</strong>`;
+        const title = document.createElement('div'); title.innerHTML = '<strong>'+escapeHtml(r.name)+'</strong>';
         const meta = document.createElement('div'); meta.className='meta'; meta.textContent = (r.ingredients||[]).length + ' ingrédients — ' + (r.steps||[]).length + ' étapes';
         const notes = document.createElement('div'); notes.className='small'; notes.textContent = r.notes || '';
         const actions = document.createElement('div'); actions.className='actions';
@@ -377,11 +423,22 @@
 
       // determine image data
       let imageData = null;
+
+      // priority: file input > remote cached dataURL (dataset.remote) > image URL field
       if(recipeImageInput.files && recipeImageInput.files[0]){
         try{
           const originalData = await fileToDataURL(recipeImageInput.files[0]);
           imageData = await resizeDataUrlIfNeeded(originalData, MAX_IMAGE_KB, MAX_IMAGE_WIDTH);
         }catch(err){ console.error('resize',err); imageData = null; }
+      } else if(recipeImageInput.dataset.remote){
+        // previously fetched remote image stored in dataset
+        try{ imageData = await resizeDataUrlIfNeeded(recipeImageInput.dataset.remote, MAX_IMAGE_KB, MAX_IMAGE_WIDTH); }catch(err){ console.warn(err); imageData = null; }
+      } else if(recipeImageUrl.value){
+        // last chance: try to fetch URL now
+        try{
+          const fetched = await fetchImageUrlToDataUrl(recipeImageUrl.value.trim());
+          imageData = await resizeDataUrlIfNeeded(fetched, MAX_IMAGE_KB, MAX_IMAGE_WIDTH);
+        }catch(err){ console.warn('fetch on save failed',err); imageData = null; }
       } else if(editingId){
         const existing = list.find(x=>x.id===editingId);
         if(deleteImageFlag) imageData = null; else imageData = existing ? existing.image || null : null;
@@ -400,9 +457,9 @@
       renderPlanner();
     }
 
-    function resetForm(){ document.getElementById('editingId').value=''; recipeForm.reset(); ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; imagePreview.innerHTML=''; removeImageBtn.style.display='none'; deleteImageFlag=false; ingredientsWrap.appendChild(createIngredient()); stepsWrap.appendChild(createStep()); }
+    function resetForm(){ document.getElementById('editingId').value=''; recipeForm.reset(); ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; imagePreview.innerHTML=''; removeImageBtn.style.display='none'; recipeImageInput.dataset.remote=''; recipeImageUrl.value=''; deleteImageFlag=false; ingredientsWrap.appendChild(createIngredient()); stepsWrap.appendChild(createStep()); }
 
-    function editRecipe(id){ const list = loadAll(); const r = list.find(x=>x.id===id); if(!r) return; showPage('recipes'); document.getElementById('editingId').value = r.id; document.getElementById('name').value = r.name || ''; document.getElementById('notes').value = r.notes || ''; ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; (r.ingredients||[]).forEach(i=>ingredientsWrap.appendChild(createIngredient(i))); (r.steps||[]).forEach(s=>stepsWrap.appendChild(createStep(s))); imagePreview.innerHTML=''; recipeImageInput.value=''; deleteImageFlag=false; if(r.image){ const img = document.createElement('img'); img.src = r.image; img.style.maxWidth='180px'; img.style.borderRadius='6px'; imagePreview.appendChild(img); removeImageBtn.style.display='inline-block'; } else removeImageBtn.style.display='none';
+    function editRecipe(id){ const list = loadAll(); const r = list.find(x=>x.id===id); if(!r) return; showPage('recipes'); document.getElementById('editingId').value = r.id; document.getElementById('name').value = r.name || ''; document.getElementById('notes').value = r.notes || ''; ingredientsWrap.innerHTML=''; stepsWrap.innerHTML=''; (r.ingredients||[]).forEach(i=>ingredientsWrap.appendChild(createIngredient(i))); (r.steps||[]).forEach(s=>stepsWrap.appendChild(createStep(s))); imagePreview.innerHTML=''; recipeImageInput.value=''; recipeImageInput.dataset.remote=''; recipeImageUrl.value=''; deleteImageFlag=false; if(r.image){ const img = document.createElement('img'); img.src = r.image; img.style.maxWidth='180px'; img.style.borderRadius='6px'; imagePreview.appendChild(img); removeImageBtn.style.display='inline-block'; } else removeImageBtn.style.display='none';
       window.scrollTo({top:0,behavior:'smooth'});
     }
 
@@ -411,9 +468,48 @@
       const plan = loadPlan(); Object.keys(plan).forEach(day=>{ Object.keys(plan[day]).forEach(meal=>{ if(plan[day][meal]===id) plan[day][meal]=null; }); }); savePlan(plan);
       renderList(); renderPlanner(); }
 
-    function showRecipe(id){ const list = loadAll(); const r = list.find(x=>x.id===id); if(!r) return; const modal = window.open('','Recette','width=600,height=700'); const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(r.name)}</title><style>body{font-family:system-ui;padding:18px}h1{margin-top:0}.meta{color:#555}img{max-width:100%;height:auto;border-radius:8px}</style></head><body><h1>${escapeHtml(r.name)}</h1>${r.image?('<img src="'+r.image+'" alt="'+escapeHtml(r.name)+'"/>') : ''}<div class="meta">Créée: ${new Date(r.created||'').toLocaleString()}</div><h3>Ingrédients</h3><ul>${(r.ingredients||[]).map(i=>'<li>'+escapeHtml(i)+'</li>').join('')}</ul><h3>Étapes</h3><ol>${(r.steps||[]).map(s=>'<li>'+escapeHtml(s)+'</li>').join('')}</ol>${r.notes?('<h3>Notes</h3><p>'+escapeHtml(r.notes)+'</p>') : ''}</body></html>`;
-      modal.document.write(html);
-      modal.document.close();
+    function showRecipe(id){
+      const list = loadAll();
+      const r = list.find(x=>x.id===id);
+      if(!r) return;
+
+      // open popup and build DOM in the new document to avoid template literal issues
+      const modal = window.open('','Recette','width=600,height=700');
+      if(!modal) return alert('Impossible d\'ouvrir la fenêtre (bloquée par le navigateur).');
+      const doc = modal.document;
+
+      // base HTML skeleton
+      const skeleton = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escapeHtml(r.name) + '</title>' +
+        '<style>body{font-family:system-ui;padding:18px;margin:0}h1{margin-top:56px}.meta{color:#555}img{max-width:100%;height:auto;border-radius:8px}#backBtn{position:fixed;top:10px;left:10px;background:#0066cc;color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:16px;cursor:pointer;z-index:1000;box-shadow:0 2px 6px rgba(0,0,0,0.15);opacity:0;transform:translateY(-10px);animation:fadeIn 0.35s ease-out forwards}#backBtn:hover{background:#0055aa}@keyframes fadeIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}.content{padding:18px}</style>' +
+        '</head><body></body></html>';
+
+      doc.open(); doc.write(skeleton); doc.close();
+
+      // create back button
+      const backBtn = doc.createElement('button'); backBtn.id = 'backBtn'; backBtn.textContent = '⬅️ Retour au carnet de recettes';
+      backBtn.addEventListener('click', ()=>{
+        try{ if(modal.opener){ modal.close(); return; } }catch(e){}
+        // fallback: navigate to main file name (assumed recettes-local.html)
+        modal.location.href = 'recettes-local.html';
+      });
+      doc.body.appendChild(backBtn);
+
+      // content
+      const container = doc.createElement('div'); container.className = 'content';
+      const h1 = doc.createElement('h1'); h1.textContent = r.name || 'Recette';
+      container.appendChild(h1);
+      if(r.image){ const im = doc.createElement('img'); im.src = r.image; im.alt = r.name || ''; container.appendChild(im); }
+      const meta = doc.createElement('div'); meta.className = 'meta'; meta.textContent = 'Créée: ' + (r.created ? new Date(r.created).toLocaleString() : ''); container.appendChild(meta);
+
+      const hIng = doc.createElement('h3'); hIng.textContent = 'Ingrédients'; container.appendChild(hIng);
+      const ul = doc.createElement('ul'); (r.ingredients||[]).forEach(it=>{ const li = doc.createElement('li'); li.textContent = it; ul.appendChild(li); }); container.appendChild(ul);
+
+      const hSteps = doc.createElement('h3'); hSteps.textContent = 'Étapes'; container.appendChild(hSteps);
+      const ol = doc.createElement('ol'); (r.steps||[]).forEach(st=>{ const li = doc.createElement('li'); li.textContent = st; ol.appendChild(li); }); container.appendChild(ol);
+
+      if(r.notes){ const hNotes = doc.createElement('h3'); hNotes.textContent = 'Notes'; container.appendChild(hNotes); const p = doc.createElement('p'); p.textContent = r.notes; container.appendChild(p); }
+
+      doc.body.appendChild(container);
     }
 
     // Planner UI
@@ -424,18 +520,18 @@
       const plan = loadPlan();
       const recipes = loadAll();
       // build table
-      let html = '<table><thead><tr><th></th>' + DAYS.map(d=>`<th>${d}</th>`).join('') + '</tr></thead><tbody>';
+      let html = '<table><thead><tr><th></th>' + DAYS.map(d=>'<th>'+d+'</th>').join('') + '</tr></thead><tbody>';
       MEALS.forEach(meal=>{
-        html += `<tr><th>${meal}</th>`;
+        html += '<tr><th>'+meal+'</th>';
         DAYS.forEach(day=>{
           const rid = plan[day] && plan[day][meal] ? plan[day][meal] : null;
           const recipe = recipes.find(r=>r.id===rid);
           let cellContent = '<div class="placeholder">—</div>';
           if(recipe){
-            const imgHtml = recipe.image ? `<img src="${recipe.image}" alt="${escapeHtml(recipe.name)}"/>` : '';
-            cellContent = `<div class="cellInner">${imgHtml}<span class="rname">${escapeHtml(recipe.name)}</span><button class="clearBtn" data-day="${day}" data-meal="${meal}" data-action="clear">Supprimer</button></div>`;
+            const imgHtml = recipe.image ? '<img src="'+recipe.image+'" alt="'+escapeHtml(recipe.name)+'"/>' : '';
+            cellContent = '<div class="cellInner">'+imgHtml+'<span class="rname">'+escapeHtml(recipe.name)+'</span><button class="clearBtn" data-day="'+day+'" data-meal="'+meal+'" data-action="clear">Supprimer</button></div>';
           }
-          html += `<td class="cell" data-day="${day}" data-meal="${meal}">${cellContent}</td>`;
+          html += '<td class="cell" data-day="'+day+'" data-meal="'+meal+'">'+cellContent+'</td>';
         });
         html += '</tr>';
       });
@@ -510,10 +606,13 @@
       const f = e.target.files[0]; if(!f) return; const reader = new FileReader();
       reader.onload = async ()=>{
         try{ const data = JSON.parse(reader.result); if(!Array.isArray(data)){ alert('Format invalide : JSON attendu (tableau).'); return }
-          // Accept image field if present (base64 dataURL) and resize it if needed
+          // Accept image field if present (base64 dataURL or remote URL) and resize it if needed
           const cleaned = [];
           for(const it of data){
             let img = it.image || null;
+            if(img && typeof img === 'string' && img.startsWith('http')){
+              try{ img = await fetchImageUrlToDataUrl(img); }catch(err){ console.warn('failed fetching remote image during import', err); img = null; }
+            }
             if(img){
               try{ img = await resizeDataUrlIfNeeded(img, MAX_IMAGE_KB, MAX_IMAGE_WIDTH); }catch(err){ console.warn('image resize import failed',err); img = null; }
             }
